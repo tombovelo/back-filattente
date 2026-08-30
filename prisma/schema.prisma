@@ -1,0 +1,164 @@
+// Prisma schema pour le système de file d'attente multi-sociétés
+// Multi-tenancy : row-level (chaque table porte company_id)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TicketStatus {
+  WAITING
+  CALLED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ABSENT
+}
+
+enum Role {
+  SUPER_ADMIN
+  COMPANY_ADMIN
+  AGENT
+}
+
+enum PaymentMode {
+  BY_COMPANY
+  BY_AGENT
+}
+
+model Company {
+  id          Int         @id @default(autoincrement())
+  name        String      @unique
+  paymentMode PaymentMode @default(BY_AGENT)
+  createdAt   DateTime    @default(now())
+
+  // Montants mensuels par défaut (null = non défini), préremplis dans le formulaire de paiement
+  monthlyAgentAmount   Decimal? @db.Decimal(10, 2)
+  monthlyCompanyAmount Decimal? @db.Decimal(10, 2)
+
+  serviceCounters ServiceCounter[]
+  users           User[]
+  tickets         QueueTicket[]
+  eventLogs       EventLog[]
+  payments        Payment[]
+}
+
+// Journal d'événements de la plateforme (SuperAdmin)
+model EventLog {
+  id        Int      @id @default(autoincrement())
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId Int?
+  event     String // ex: ticket_created, ticket_called, ticket_completed, ...
+  message   String
+  level     String   @default("INFO") // INFO | WARN | ERROR
+  createdBy String? // username de l'acteur si connexe
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([createdAt])
+}
+
+model ServiceCounter {
+  id        Int     @id @default(autoincrement())
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId Int
+  name      String
+  prefix    String  @default("A") // Lettre utilisée pour le n° de ticket (ex: A -> #A-012)
+  isActive  Boolean @default(true)
+
+  // Séquence atomique de tickets distribués par ce guichet
+  ticketCounter Int @default(0)
+
+  users   User[]
+  tickets QueueTicket[]
+
+  @@unique([companyId, name])
+  @@index([companyId, isActive])
+}
+
+// Appareil mobile d'un patient (remplace le PSID Messenger pour les notifications push)
+model PatientDevice {
+  id          Int      @id @default(autoincrement())
+  deviceToken String   @unique // Expo Push Token / FCM token de l'appareil
+  platform    String   @default("expo") // expo | fcm | apns
+  lastSeenAt  DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  tickets QueueTicket[]
+}
+
+// Utilisateur unifié : SUPER_ADMIN (plateforme) / COMPANY_ADMIN / AGENT (guichetier)
+model User {
+  id                Int             @id @default(autoincrement())
+  role              Role            @default(AGENT)
+  company           Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId         Int?
+  username          String
+  passwordHash      String
+  isActive          Boolean         @default(true)
+  // Quota journalier de patients (null ou 0 = aucune limite)
+  dailyCapacity     Int?
+  assignedCounter   ServiceCounter? @relation(fields: [assignedCounterId], references: [id], onDelete: SetNull)
+  assignedCounterId Int?
+
+  calledTickets QueueTicket[] @relation("UserCalled")
+
+  payments         Payment[] @relation("AgentPayments")
+  recordedPayments Payment[] @relation("RecordedPayments")
+
+  @@unique([companyId, username])
+  @@index([companyId])
+  @@index([role])
+}
+
+// Paiement mensuel d'une société (mode BY_COMPANY) ou d'un agent (mode BY_AGENT).
+// Un paiement couvre le mois courant. À partir du 6, une entité impayée est bloquée.
+model Payment {
+  id           Int         @id @default(autoincrement())
+  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId    Int
+  agent        User?       @relation("AgentPayments", fields: [agentId], references: [id], onDelete: Cascade)
+  agentId      Int?
+  scope        PaymentMode // BY_COMPANY = paiement société / BY_AGENT = paiement médecin
+  amount       Decimal     @default(0) @db.Decimal(10, 2)
+  periodMonth  String // ex: "2026-08" (mois couvert par le paiement)
+  note         String?
+  recordedById Int
+  recordedBy   User        @relation("RecordedPayments", fields: [recordedById], references: [id])
+  paidAt       DateTime    @default(now())
+
+  @@unique([agentId, periodMonth])
+  @@index([companyId, periodMonth])
+  @@index([companyId, scope])
+  @@index([recordedById])
+}
+
+model QueueTicket {
+  id              Int            @id @default(autoincrement())
+  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId       Int
+  counter         ServiceCounter @relation(fields: [counterId], references: [id], onDelete: Cascade)
+  counterId       Int
+  ticketNumber    String // ex: A-012 (composé du prefix du guichet + séquence)
+  patientDevice   PatientDevice? @relation(fields: [patientDeviceId], references: [id], onDelete: Cascade)
+  patientDeviceId Int?
+  status          TicketStatus   @default(WAITING)
+  createdAt       DateTime       @default(now())
+  calledAt        DateTime?
+  completedAt     DateTime?
+  remindedAt      DateTime? // Date du dernier rappel "2 personnes avant" (évite les doublons)
+
+  calledBy       User? @relation("UserCalled", fields: [calledByUserId], references: [id], onDelete: SetNull)
+  calledByUserId Int?
+
+  @@unique([counterId, ticketNumber])
+  @@index([companyId, status])
+  @@index([companyId, status, createdAt])
+  @@index([counterId, status, createdAt])
+  @@index([patientDeviceId, status])
+  @@index([patientDeviceId, createdAt])
+}
