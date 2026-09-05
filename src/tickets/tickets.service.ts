@@ -482,11 +482,27 @@ export class TicketsService {
    * GET /tickets/stats - statistiques temps réel pour le dashboard admin.
    */
   async getStats(companyId: number) {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    // Madagascar = UTC+3 toute l'année (pas d'heure d'été).
+    // Toutes les stats journalières sont calculées en heure de Tana,
+    // pas en heure locale du serveur.
+    const TANA_OFFSET_MS = 3 * 60 * 60 * 1000;
+    // On parle d'heure de pointe uniquement à partir de ce seuil
+    const PEAK_MIN_COUNT = 10;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const toTana = (d: Date) => new Date(d.getTime() + TANA_OFFSET_MS);
+    const tanaDayKey = (d: Date) => {
+      const t = toTana(d);
+      return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+    };
+    const tanaHour = (d: Date) => toTana(d).getUTCHours();
 
-    const sevenDaysAgo = new Date(todayStart);
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const tanaNow = toTana(new Date());
+    // Minuit à Tana, exprimé en timestamp UTC
+    const todayStart = new Date(
+      Date.UTC(tanaNow.getUTCFullYear(), tanaNow.getUTCMonth(), tanaNow.getUTCDate()) - TANA_OFFSET_MS,
+    );
+
+    const sevenDaysAgo = new Date(todayStart.getTime() - 6 * 24 * 3600 * 1000);
 
     const todayTickets = await this.prisma.queueTicket.findMany({
       where: { companyId, createdAt: { gte: todayStart } },
@@ -503,25 +519,23 @@ export class TicketsService {
     const cancelledToday = todayTickets.filter((t) => t.status === TicketStatus.CANCELLED).length;
     const absentToday = todayTickets.filter((t) => t.status === TicketStatus.ABSENT).length;
 
-    // Heures de pointe aujourd'hui (tickets créés par heure)
+    // Heures de pointe aujourd'hui (tickets créés par heure, en heure de Tana,
+    // tickets annulés exclus). On parle de pointe uniquement à partir de PEAK_MIN_COUNT.
     const peakHours: { hour: number; count: number }[] = [];
     for (let h = 0; h < 24; h++) {
-      const count = todayTickets.filter((t) => t.createdAt.getHours() === h).length;
-      if (count > 0) peakHours.push({ hour: h, count });
+      const count = todayTickets.filter(
+        (t) => t.status !== TicketStatus.CANCELLED && tanaHour(t.createdAt) === h,
+      ).length;
+      if (count >= PEAK_MIN_COUNT) peakHours.push({ hour: h, count });
     }
     peakHours.sort((a, b) => b.count - a.count);
 
-    // 7 derniers jours
+    // 7 derniers jours (découpés en jours de Tana)
     const last7Days: { date: string; created: number; completed: number }[] = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(todayStart);
-      d.setDate(d.getDate() - i);
-      const dayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const dayTickets = weekTickets.filter((t) => {
-        const ct = t.createdAt;
-        const ts = `${ct.getFullYear()}-${String(ct.getMonth() + 1).padStart(2, '0')}-${String(ct.getDate()).padStart(2, '0')}`;
-        return ts === dayStr;
-      });
+      const d = new Date(todayStart.getTime() + (6 - i) * 24 * 3600 * 1000);
+      const dayStr = tanaDayKey(d);
+      const dayTickets = weekTickets.filter((t) => tanaDayKey(t.createdAt) === dayStr);
       last7Days.push({
         date: dayStr,
         created: dayTickets.length,
