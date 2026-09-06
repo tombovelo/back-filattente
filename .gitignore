@@ -10,4 +10,4 @@ prisma/migrations/**/migration_lock.toml
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+.vscode/public/apk/*.apk

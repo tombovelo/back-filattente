@@ -54,16 +54,9 @@ export class TicketsService {
       );
     }
 
-    const capacity = agent.dailyCapacity ?? 0;
-    if (capacity > 0) {
-      const todayCount = await this.countTodayTickets(counter.id, companyId);
-      if (todayCount >= capacity) {
-        throw new BadRequestException(
-          "Quota atteint : cet agent ne peut plus recevoir de patients aujourd'hui.",
-        );
-      }
-    }
-
+    // Le quota ne bloque PAS l'appel de la file existante :
+    // appeler le suivant ne crée aucun nouveau ticket.
+    // Seuls les NOUVEAUX patients sont bloqués au scan du QR (patients.service).
     const nextTicket = await this.prisma.queueTicket.findFirst({
       where: {
         counterId: counter.id,
