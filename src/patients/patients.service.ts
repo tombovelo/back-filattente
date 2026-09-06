@@ -141,10 +141,10 @@ export class PatientsService {
       if (todayCount >= capacity) {
         await this.sendScanBlockedPush(
           deviceId,
-          "L'agent a atteint son quota et ne peut plus recevoir de patients aujourd'hui.",
+          "L'agent a atteint son quota et ne peut plus recevoir de clients aujourd'hui.",
         );
         throw new BadRequestException(
-          "L'agent a atteint son quota et ne peut plus recevoir de patients aujourd'hui.",
+          "L'agent a atteint son quota et ne peut plus recevoir de clients aujourd'hui.",
         );
       }
     }
