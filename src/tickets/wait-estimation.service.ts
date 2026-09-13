@@ -85,10 +85,7 @@ export class WaitEstimationService {
    */
   estimate(peopleAhead: number, stats: CounterStats | undefined): { seconds: number; minSeconds: number; maxSeconds: number } {
     if (peopleAhead <= 0) return { seconds: 0, minSeconds: 0, maxSeconds: 0 };
-    const perPerson =
-      stats && stats.sampleCount >= this.MIN_SAMPLES && stats.avgServiceSeconds > 0
-        ? stats.avgServiceSeconds
-        : this.DEFAULT_PER_PERSON_SECONDS;
+    const perPerson = this.serviceSeconds(stats);
 
     const seconds = Math.round(peopleAhead * perPerson);
     // Fourchette : -20% / +30% pour ten compte de la variabilité
@@ -98,13 +95,25 @@ export class WaitEstimationService {
     return { seconds, minSeconds, maxSeconds };
   }
 
+  private serviceSeconds(stats: CounterStats | undefined): number {
+    if (!stats || stats.sampleCount === 0 || stats.avgServiceSeconds <= 0) {
+      return this.DEFAULT_PER_PERSON_SECONDS;
+    }
+
+    const priorCount = this.MIN_SAMPLES;
+    return Math.round(
+      (this.DEFAULT_PER_PERSON_SECONDS * priorCount + stats.avgServiceSeconds * stats.sampleCount) /
+        (priorCount + stats.sampleCount),
+    );
+  }
+
   /** Estimation pour un ticket précis dans la file de son guichet */
   async estimateForTicket(
     companyId: number,
     counterId: number,
     ticketCreatedAt: Date,
   ): Promise<WaitEstimate> {
-    const [before, current, statsMap] = await Promise.all([
+    const [before, currentTickets, statsMap] = await Promise.all([
       this.prisma.queueTicket.count({
         where: {
           companyId,
@@ -113,15 +122,28 @@ export class WaitEstimationService {
           createdAt: { lt: ticketCreatedAt },
         },
       }),
-      this.prisma.queueTicket.count({
+      this.prisma.queueTicket.findMany({
         where: { companyId, counterId, status: TicketStatus.CALLED },
+        select: { calledAt: true },
       }),
       this.serviceStatsByCounter(companyId),
     ]);
     const stats = statsMap.get(counterId);
-    const est = this.estimate(before + current, stats);
+    const serviceSeconds = this.serviceSeconds(stats);
+    const now = Date.now();
+    const currentRemaining = currentTickets.reduce((total, ticket) => {
+      if (!ticket.calledAt) return total + serviceSeconds;
+      const elapsed = Math.max(0, Math.round((now - ticket.calledAt.getTime()) / 1000));
+      return total + Math.max(0, serviceSeconds - elapsed);
+    }, 0);
+    const seconds = Math.round(currentRemaining + before * serviceSeconds);
+    const est = {
+      seconds,
+      minSeconds: Math.round(seconds * 0.8),
+      maxSeconds: Math.round(seconds * 1.3),
+    };
     return {
-      peopleAhead: before + current,
+      peopleAhead: before + currentTickets.length,
       before,
       seconds: est.seconds,
       minSeconds: est.minSeconds,
