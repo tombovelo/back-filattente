@@ -227,6 +227,23 @@ export class CompaniesService {
     return agent;
   }
 
+  async unassignAgentFromCounter(companyId: number, agentId: number) {
+    await this.ensureAgentInCompany(companyId, agentId);
+
+    const agent = await this.prisma.user.update({
+      where: { id: agentId },
+      data: { assignedCounterId: null },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        assignedCounter: { select: { id: true, name: true } },
+      },
+    });
+    this.broadcastCompanyChanged(companyId, 'agent_unassigned');
+    return agent;
+  }
+
   async updateAgent(companyId: number, agentId: number, dto: UpdateAgentDto) {
     await this.ensureAgentInCompany(companyId, agentId);
 

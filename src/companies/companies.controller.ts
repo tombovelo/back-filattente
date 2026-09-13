@@ -119,6 +119,17 @@ export class CompaniesController {
     return this.companies.assignAgentToCounter(companyId, agentId, counterId);
   }
 
+  @Delete(':companyId/agents/:agentId/assign-counter')
+  @Roles(Role.SUPER_ADMIN, Role.COMPANY_ADMIN)
+  unassignAgentFromCounter(
+    @Param('companyId', ParseIntPipe) companyId: number,
+    @Param('agentId', ParseIntPipe) agentId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    this.assertAccessCompanyAdmin(user, companyId);
+    return this.companies.unassignAgentFromCounter(companyId, agentId);
+  }
+
   @Patch(':companyId/agents/:agentId')
   @Roles(Role.SUPER_ADMIN, Role.COMPANY_ADMIN)
   updateAgent(
