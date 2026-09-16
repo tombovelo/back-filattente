@@ -526,7 +526,7 @@ export class TicketsService {
     // 7 derniers jours (découpés en jours de Tana)
     const last7Days: { date: string; created: number; completed: number }[] = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(todayStart.getTime() + (6 - i) * 24 * 3600 * 1000);
+      const d = new Date(todayStart.getTime() - i * 24 * 3600 * 1000);
       const dayStr = tanaDayKey(d);
       const dayTickets = weekTickets.filter((t) => tanaDayKey(t.createdAt) === dayStr);
       last7Days.push({
