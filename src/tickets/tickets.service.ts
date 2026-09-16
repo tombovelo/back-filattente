@@ -20,7 +20,7 @@ export class TicketsService {
     private readonly estimation: WaitEstimationService,
     private readonly logs: LogsService,
     private readonly payments: PaymentsService,
-  ) {}
+  ) { }
 
   /**
    * Retourne le guichet assigné a l'agent, avec garde-fous
@@ -251,12 +251,12 @@ export class TicketsService {
     const waitingPerCounter = await this.prisma.queueTicket.findMany({
       where: companyId
         ? {
-            companyId,
-            status: { in: [TicketStatus.WAITING, TicketStatus.CALLED] },
-          }
+          companyId,
+          status: { in: [TicketStatus.WAITING, TicketStatus.CALLED] },
+        }
         : {
-            status: { in: [TicketStatus.WAITING, TicketStatus.CALLED] },
-          },
+          status: { in: [TicketStatus.WAITING, TicketStatus.CALLED] },
+        },
       orderBy: { createdAt: 'asc' },
       include: { counter: true },
     });
