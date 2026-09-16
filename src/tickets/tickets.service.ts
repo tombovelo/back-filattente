@@ -479,8 +479,6 @@ export class TicketsService {
     // Toutes les stats journalières sont calculées en heure de Tana,
     // pas en heure locale du serveur.
     const TANA_OFFSET_MS = 3 * 60 * 60 * 1000;
-    // On parle d'heure de pointe uniquement à partir de ce seuil
-    const PEAK_MIN_COUNT = 10;
     const pad = (n: number) => String(n).padStart(2, '0');
     const toTana = (d: Date) => new Date(d.getTime() + TANA_OFFSET_MS);
     const tanaDayKey = (d: Date) => {
@@ -513,13 +511,13 @@ export class TicketsService {
     const absentToday = todayTickets.filter((t) => t.status === TicketStatus.ABSENT).length;
 
     // Heures de pointe aujourd'hui (tickets créés par heure, en heure de Tana,
-    // tickets annulés exclus). On parle de pointe uniquement à partir de PEAK_MIN_COUNT.
+    // tickets annulés exclus).
     const peakHours: { hour: number; count: number }[] = [];
     for (let h = 0; h < 24; h++) {
       const count = todayTickets.filter(
         (t) => t.status !== TicketStatus.CANCELLED && tanaHour(t.createdAt) === h,
       ).length;
-      if (count >= PEAK_MIN_COUNT) peakHours.push({ hour: h, count });
+      if (count > 0) peakHours.push({ hour: h, count });
     }
     peakHours.sort((a, b) => b.count - a.count);
 
